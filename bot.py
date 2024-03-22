@@ -1,7 +1,8 @@
 import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-from datetime import datetime
+import datetime
+from zoneinfo import ZoneInfo
 
 import my_token
 
@@ -15,9 +16,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def send_notification(context: ContextTypes.DEFAULT_TYPE):
-    chat_id = context.job.data
     message = "Reminder!!! Drin Drin"
-    await context.bot.send_message(chat_id=chat_id, text=message)
+    await context.bot.send_message(chat_id=context.job.chat_id, text=message)
 
 
 def remove_job_if_exists(name: str, context: ContextTypes.DEFAULT_TYPE):
@@ -38,7 +38,7 @@ async def set_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         job_removed = remove_job_if_exists(str(chat_id), context)
-        context.job_queue.run_once(send_notification, scadenza, name=str(chat_id), data=chat_id)
+        context.job_queue.run_once(send_notification, scadenza, name=str(chat_id), chat_id=chat_id)
 
         text = "Timer set!"
         if job_removed:
@@ -46,6 +46,35 @@ async def set_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(text)
     except(IndexError, ValueError):
         await update.effective_message.reply_text("Usage: /set <seconds>")
+
+
+async def set_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_message.chat_id
+    try:
+        time_input = context.args[0].split(':')
+        hour = int(time_input[0])
+        minute = int(time_input[1])
+        try:
+            second = int(time_input[2])
+        except IndexError:
+            second = 0
+
+        if not (0 <= hour <= 23) or not (0 <= minute <= 59) or not (0 <= second <= 59):
+            await update.effective_message.reply_text("Invalid time format. Please use HH:MM(:SS)? format.")
+            return
+
+        datetime_obj = datetime.time(hour, minute, second, tzinfo=ZoneInfo("Europe/Rome"))
+        job_name = datetime_obj.strftime('%H:%M:%S')
+
+        job_removed = remove_job_if_exists(job_name, context)
+        context.job_queue.run_daily(send_notification, datetime_obj, name=job_name, chat_id=chat_id)
+
+        text = f"Timer set at {datetime_obj}!"
+        if job_removed:
+            text += "\nOld one was removed"
+        await update.effective_message.reply_text(text)
+    except(IndexError, ValueError):
+        await update.effective_message.reply_text("Usage: /set_daily <HH:MM(:SS)?>")
 
 
 async def unset_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -62,6 +91,7 @@ def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("set", set_timer))
+    application.add_handler(CommandHandler("set_daily", set_daily))
     application.add_handler(CommandHandler("unset", unset_timer))
 
     # Avvia il bot
